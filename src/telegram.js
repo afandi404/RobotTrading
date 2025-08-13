@@ -21,10 +21,6 @@ export async function sendTelegramPhotoBuffer(buffer, caption){
     form.append('caption', caption);
     form.append('parse_mode', 'Markdown');
     form.append('photo', buffer, { filename: 'signal.png', contentType: 'image/png' });
-    await axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendPhoto`, form, {
-      headers: form.getHeaders(),
-      maxContentLength: Infinity,
-      maxBodyLength: Infinity
-    });
+    await axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendPhoto`, form, { headers: form.getHeaders(), maxContentLength: Infinity, maxBodyLength: Infinity });
   } catch (e) { console.error('sendTelegramPhotoBuffer err', e?.response?.data || e?.message || e); }
 }

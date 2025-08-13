@@ -1,10 +1,10 @@
 import { computeAdaptiveRsi, detectRsiSignal } from './indicators.js';
-import { CONFIRMATION_CANDLES, COOLDOWN_SECONDS, TAKE_PROFIT_PERCENT, STOP_LOSS_PERCENT, POSITION_SIZE_PERCENT, LEVERAGE, AUTO_TRADE, LSR_BUY, LSR_SELL, FUNDING_THRESHOLD, INTERVAL } from './config.js';
-import { fetchLongShort, fetchFundingRate, fetchOpenInterest, fetchKlines, fetchUSDTBalance, placeMarketOrder, placeCloseTP, placeCloseSL } from './binance.js';
+import { CONFIRMATION_CANDLES, COOLDOWN_SECONDS, TAKE_PROFIT_PERCENT, STOP_LOSS_PERCENT, POSITION_SIZE_PERCENT, LEVERAGE, AUTO_TRADE, LSR_BUY, LSR_SELL, FUNDING_THRESHOLD, INTERVAL, TRAILING_STOP_PERCENT, PARTIAL_TP1_PERCENT, PARTIAL_TP1_PROFIT, PARTIAL_TP2_PERCENT, PARTIAL_TP2_PROFIT, PAPER } from './config.js';
+import { fetchLongShort, fetchFundingRate, fetchOpenInterest, fetchKlines, fetchUSDTBalance, placeMarketOrder, placeCloseTP, placeCloseSL, getPositionRisk, getSymbolInfo, changeLeverage, cancelAllOpenOrders } from './binance.js';
 import { sendTelegramText, sendTelegramPhotoBuffer } from './telegram.js';
 import { buildLineChartConfig, getChartPngBuffer } from './chart.js';
 import { logEvent, logTrade } from './logger.js';
-import { computeQtyFromBalance } from './risk.js';
+import { computeQtyFromBalance, buildTpSlPrices, floorToTick } from './risk.js';
 
 export class SymbolWorker{
   constructor(symbol, interval){
@@ -14,6 +14,7 @@ export class SymbolWorker{
     this.times = [];
     this.pending = null;
     this.lastSent = { signature: null, ts: 0 };
+    this.trailing = null; // { side, entryPrice, peak, trough, slPrice }
   }
 
   canSend(signature){
@@ -29,6 +30,10 @@ export class SymbolWorker{
     logEvent(`Worker ${this.symbol} loaded history ${this.closes.length}`);
   }
 
+  async ensureLeverage(){
+    try{ await changeLeverage(this.symbol, LEVERAGE); }catch(e){ logEvent('changeLeverage failed '+String(e)); }
+  }
+
   async onNewClosedCandle(){
     try {
       const { period, rsi } = computeAdaptiveRsi(this.closes);
@@ -36,6 +41,9 @@ export class SymbolWorker{
       const rsiSignal = detectRsiSignal(rsi);
       const price = this.closes[this.closes.length-1];
       const rsiValue = rsi[rsi.length-1];
+
+      // Update trailing stop if any position
+      await this.updateTrailing(price);
 
       if (!this.pending){
         if (rsiSignal){
@@ -89,38 +97,45 @@ export class SymbolWorker{
             `FundingRate: ${fr ?? 'N/A'}`,
             `OpenInterest: ${oi ?? 'N/A'}`,
             `Time: ${new Date().toLocaleString()}`
-          ].join('');
+          ].join('\n');
 
           if (allow){
             this.markSent(signature);
             if (imgBuf) await sendTelegramPhotoBuffer(imgBuf, caption); else await sendTelegramText(caption);
 
-            if (AUTO_TRADE){
+            if (AUTO_TRADE && !PAPER){
+              await this.ensureLeverage();
               try {
+                const info = await getSymbolInfo(this.symbol);
                 const usdtBal = await fetchUSDTBalance();
                 if (usdtBal <= 0) throw new Error('USDT balance zero');
-                const qty = computeQtyFromBalance({ usdtBalance: usdtBal, price, positionPercent: POSITION_SIZE_PERCENT, leverage: LEVERAGE });
+                const qty = await computeQtyFromBalance({ symbol: this.symbol, usdtBalance: usdtBal, price, positionPercent: POSITION_SIZE_PERCENT, leverage: LEVERAGE });
                 if (qty <= 0) throw new Error('qty=0');
                 const side = this.pending.type === 'BUY' ? 'BUY' : 'SELL';
                 const order = await placeMarketOrder(this.symbol, side, qty);
                 logTrade({ symbol: this.symbol, side, qty, price, meta: { order } });
 
-                const tpSide = side === 'BUY' ? 'SELL' : 'BUY';
-                const slSide = tpSide; // close position side
-                const tpPrice = side === 'BUY' ? price * (1 + TAKE_PROFIT_PERCENT/100) : price * (1 - TAKE_PROFIT_PERCENT/100);
-                const slPrice = side === 'BUY' ? price * (1 - STOP_LOSS_PERCENT/100) : price * (1 + STOP_LOSS_PERCENT/100);
+                // Set initial TP/SL
+                const { tp, sl } = buildTpSlPrices({ side, price, takeProfitPct: TAKE_PROFIT_PERCENT, stopLossPct: STOP_LOSS_PERCENT, tickSize: info.tickSize });
+                const closeSide = side === 'BUY' ? 'SELL' : 'BUY';
+                try { await cancelAllOpenOrders(this.symbol); } catch {}
+                try { await placeCloseTP(this.symbol, closeSide, tp.toFixed(8)); } catch(e){ logEvent('TP place failed ' + String(e)); }
+                try { await placeCloseSL(this.symbol, closeSide, sl.toFixed(8)); } catch(e){ logEvent('SL place failed ' + String(e)); }
 
-                try { await placeCloseTP(this.symbol, tpSide, tpPrice.toFixed(2)); } catch(e){ logEvent('TP place failed ' + String(e)); }
-                try { await placeCloseSL(this.symbol, slSide, slPrice.toFixed(2)); } catch(e){ logEvent('SL place failed ' + String(e)); }
+                // Initialize trailing
+                this.trailing = side==='BUY'
+                  ? { side, entryPrice: price, peak: price, slPrice: sl }
+                  : { side, entryPrice: price, trough: price, slPrice: sl };
 
-                await sendTelegramText(`${this.symbol} AUTO-TRADE ${side} qty=${qty} @${price}. TP ${tpPrice.toFixed(2)} SL ${slPrice.toFixed(2)}`);
+                // Partial TP not natively supported with closePosition=true, usually use reduceOnly orders with quantity. Here we keep SL/TP closePosition and let trailing handle SL improvement.
+                await sendTelegramText(`${this.symbol} AUTO-TRADE ${side} qty=${qty} @${price}. TP ${tp} SL ${sl}`);
               } catch(e){
                 await sendTelegramText(`${this.symbol} AUTO-TRADE ERROR: ${String(e)}`);
               }
             }
           } else {
             logEvent('Confirmed but metrics blocked for ' + this.symbol);
-            if (imgBuf) await sendTelegramPhotoBuffer(imgBuf, caption + 'Blocked by metrics'); else await sendTelegramText(caption + 'Blocked by metrics');
+            if (imgBuf) await sendTelegramPhotoBuffer(imgBuf, caption + '\nBlocked by metrics'); else await sendTelegramText(caption + '\nBlocked by metrics');
           }
           this.pending = null;
         }
@@ -138,6 +153,34 @@ export class SymbolWorker{
       logEvent('onNewClosedCandle error ' + String(e));
       this.pending = null;
     }
+  }
+
+  async updateTrailing(price){
+    if (!this.trailing || PAPER) return;
+    try{
+      const info = await getSymbolInfo(this.symbol);
+      const pos = await getPositionRisk(this.symbol);
+      const posAmt = Number(pos.positionAmt || 0);
+      if (posAmt === 0){ this.trailing = null; return; }
+      const side = posAmt>0 ? 'BUY' : 'SELL';
+      if (side==='BUY'){
+        this.trailing.peak = Math.max(this.trailing.peak || price, price);
+        const newSl = this.trailing.peak * (1 - TRAILING_STOP_PERCENT/100);
+        if (newSl > this.trailing.slPrice){
+          const sl = floorToTick(newSl, info.tickSize);
+          const closeSide = 'SELL';
+          try { await placeCloseSL(this.symbol, closeSide, sl.toFixed(8)); this.trailing.slPrice = sl; logEvent(`Trailing SL moved BUY -> ${sl}`); } catch(e){ logEvent('Trailing SL update failed '+String(e)); }
+        }
+      } else { // SELL
+        this.trailing.trough = Math.min(this.trailing.trough || price, price);
+        const newSl = this.trailing.trough * (1 + TRAILING_STOP_PERCENT/100);
+        if (newSl < this.trailing.slPrice){
+          const sl = floorToTick(newSl, info.tickSize);
+          const closeSide = 'BUY';
+          try { await placeCloseSL(this.symbol, closeSide, sl.toFixed(8)); this.trailing.slPrice = sl; logEvent(`Trailing SL moved SELL -> ${sl}`); } catch(e){ logEvent('Trailing SL update failed '+String(e)); }
+        }
+      }
+    }catch(e){ logEvent('updateTrailing err '+String(e)); }
   }
 
   heartbeat(price = this.closes[this.closes.length-1], rsiValue = null, period = null){

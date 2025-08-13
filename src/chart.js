@@ -1,18 +1,21 @@
-// Build & render QuickChart images tanpa extra dependency
 import axios from 'axios';
 import { QUICKCHART_WIDTH, QUICKCHART_HEIGHT } from './config.js';
 
-export function buildLineChartConfig({ labels, closes, symbol, interval, signalType }){
+export function buildLineChartConfig({ labels, closes, symbol, interval, signalType, overlays = {} }){
+  const datasets = [
+    { label: `${symbol} ${interval}`, data: closes, fill: false, borderWidth: 2, pointRadius: 0 }
+  ];
+  if (overlays.ema){ datasets.push({ label: 'EMA', data: overlays.ema, fill:false, borderWidth:1, pointRadius:0 }); }
+  if (overlays.bbU && overlays.bbL){
+    datasets.push({ label:'BB Upper', data: overlays.bbU, fill:false, borderWidth:1, pointRadius:0 });
+    datasets.push({ label:'BB Lower', data: overlays.bbL, fill:false, borderWidth:1, pointRadius:0 });
+  }
+  datasets.push({ type: 'bubble', label: 'Signal', data: closes.map((v,i)=> i===closes.length-1 ? { x:i, y:v, r: 8 } : null), backgroundColor: signalType === 'BUY' ? 'green' : 'red' });
+
   const cfg = {
     type: 'line',
-    data: {
-      labels,
-      datasets: [
-        { label: `${symbol} ${interval}`, data: closes, fill: false, borderWidth: 2, pointRadius: 0 },
-        { type: 'bubble', label: 'Signal', data: closes.map((v,i)=> i===closes.length-1 ? { x:i, y:v, r: 8 } : null), backgroundColor: signalType === 'BUY' ? 'green' : 'red' }
-      ]
-    },
-    options: { legend: { display: false }, title: { display: true, text: `${symbol} • ${signalType} signal` }, scales: { xAxes: [{ display: true }], yAxes: [{ display: true }] } }
+    data: { labels, datasets },
+    options: { legend: { display: true }, title: { display: true, text: `${symbol} • ${signalType} signal` }, scales: { xAxes: [{ display: true }], yAxes: [{ display: true }] } }
   };
   return cfg;
 }

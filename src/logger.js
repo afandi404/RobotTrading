@@ -7,18 +7,25 @@ const tradeLogFile = path.join(LOG_DIR, 'trades.log');
 const eventLogFile = path.join(LOG_DIR, 'events.log');
 
 export function logEvent(msg, meta = {}){
-  const line = JSON.stringify({ ts: new Date().toISOString(), msg, meta });
+  const line = JSON.stringify({ ts: new Date().toISOString(), level:'info', msg, ...meta });
   console.log(msg, Object.keys(meta).length ? meta : '');
-  fs.appendFileSync(eventLogFile, line + '');
+  fs.appendFileSync(eventLogFile, line + "\n");
+}
+
+export function logWarn(msg, meta = {}){
+  const line = JSON.stringify({ ts: new Date().toISOString(), level:'warn', msg, ...meta });
+  console.warn(msg, Object.keys(meta).length ? meta : '');
+  fs.appendFileSync(eventLogFile, line + "\n");
+}
+
+export function logError(err, meta={}){
+  const line = JSON.stringify({ ts: new Date().toISOString(), level:'error', err: String(err), ...meta });
+  console.error(err);
+  fs.appendFileSync(eventLogFile, line + "\n");
 }
 
 export function logTrade(entry){
   const line = JSON.stringify({ ts: new Date().toISOString(), ...entry });
   console.log('TRADE', entry.side, entry.symbol, entry.qty, '@', entry.price);
-  fs.appendFileSync(tradeLogFile, line + '');
-}
-
-export function logError(err){
-  console.error(err);
-  try { fs.appendFileSync(eventLogFile, JSON.stringify({ ts: new Date().toISOString(), err: String(err) }) + ''); } catch(e){}
+  fs.appendFileSync(tradeLogFile, line + "\n");
 }
