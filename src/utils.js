@@ -3,3 +3,9 @@ export function stddev(arr){ if(!arr.length) return 0; const m=mean(arr); return
 export function clamp(v,a,b){ return Math.max(a, Math.min(b, v)); }
 export const sleep = (ms)=> new Promise(res=> setTimeout(res, ms));
 export function floorToStep(value, step){ const precision = Math.max(0, Math.ceil(-Math.log10(step))); const factor = Math.pow(10, precision); return Math.floor(value * factor) / factor; }
+export function roundToTick(value, tick){ const p = Math.max(0, Math.ceil(-Math.log10(tick))); const f = Math.pow(10, p); return Math.round(value * f) / f; }
+export function sum(a){ return a.reduce((x,y)=>x+y,0); }
+export function maxDrawdown(series){ let peak=-Infinity, dd=0; for(const v of series){ peak = Math.max(peak, v); dd = Math.max(dd, (peak - v)/peak); } return dd; }
+export function sharpe(returns, rf=0){ const ex = returns.map(r=>r-rf); const s = stddev(ex); return s? mean(ex)/s*Math.sqrt(252):0; }
+export function sortino(returns, rf=0){ const ex = returns.map(r=>r-rf); const neg = ex.filter(r=>r<0); const ds = stddev(neg); return ds? mean(ex)/ds*Math.sqrt(252):0; }
+export function pct(a,b){ return b===0?0: (a-b)/b*100; }

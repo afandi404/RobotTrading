@@ -3,8 +3,7 @@ import { publicGet, signedRequest } from './http.js';
 const _symbolInfoCache = new Map();
 
 export async function fetchExchangeInfo(){
-  const data = await publicGet('/fapi/v1/exchangeInfo');
-  return data;
+  return await publicGet('/fapi/v1/exchangeInfo');
 }
 
 export async function getSymbolInfo(symbol){
@@ -27,8 +26,8 @@ export async function getSymbolInfo(symbol){
   return res;
 }
 
-export async function fetchKlines(symbol, interval, limit = 500){
-  return await publicGet('/fapi/v1/klines', { symbol, interval, limit });
+export async function fetchKlines(symbol, interval, limit = 500, startTime, endTime){
+  return await publicGet('/fapi/v1/klines', { symbol, interval, limit, startTime, endTime });
 }
 
 export async function fetchBalance(){
@@ -67,6 +66,14 @@ export async function fetchOpenInterest(symbol){
   } catch { return undefined; }
 }
 
+export async function fetchMarkPrice(symbol){
+  try{ const d = await publicGet('/fapi/v1/premiumIndex', { symbol }); return Number(d.markPrice); }catch{ return undefined; }
+}
+
+export async function fetchOrderBook(symbol, limit=50){
+  return await publicGet('/fapi/v1/depth', { symbol, limit });
+}
+
 export async function changeLeverage(symbol, leverage){
   return await signedRequest('POST', '/fapi/v1/leverage', { symbol, leverage });
 }
@@ -76,13 +83,13 @@ export async function getPositionRisk(symbol){
   return Array.isArray(data) ? data[0] : data;
 }
 
-export async function placeMarketOrder(symbol, side, quantity){
-  const params = { symbol, side, type: 'MARKET', quantity };
+export async function placeMarketOrder(symbol, side, quantity, reduceOnly=false){
+  const params = { symbol, side, type: 'MARKET', quantity, reduceOnly };
   return await signedRequest('POST', '/fapi/v1/order', params);
 }
 
-export async function placeLimitOrder(symbol, side, quantity, price){
-  const params = { symbol, side, type: 'LIMIT', timeInForce: 'GTC', quantity, price };
+export async function placeLimitOrder(symbol, side, quantity, price, reduceOnly=false){
+  const params = { symbol, side, type: 'LIMIT', timeInForce: 'GTC', quantity, price, reduceOnly };
   return await signedRequest('POST', '/fapi/v1/order', params);
 }
 

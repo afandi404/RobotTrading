@@ -1,27 +1,57 @@
-# Binance Futures Pro Bot — Final Upgrade
+# Robot Trading Pro – 90% World-Class Upgrade
 
-Fitur utama:
-- Smart REST retry + failover endpoint
-- WebSocket heartbeat ping/pong + exponential reconnect
-- Adaptive RSI + konfirmasi candle
-- Filter LSR, Funding Rate, OI
-- AUTO TRADE (opsional), dynamic qty dari exchangeInfo (stepSize/tickSize)
-- TP/SL awal + **Trailing Stop realtime** (pergeseran SL otomatis)
-- Partial TP (konsep) dan cancel open orders sebelum pasang TP/SL baru
-- Laporan harian Telegram (realized PnL) pada jam `DAILY_REPORT_HOUR` WIB
-- Backtest sederhana & struktur siap untuk paper trading
+## 🚀 Overview
+Bot trading **Binance Futures USDⓈ-M** profesional berbasis **Node.js** yang menggabungkan eksekusi real-time, strategi adaptif, backtest realistis, dan risk management kelas dunia.  
+Dirancang untuk performa konsisten, fleksibilitas tinggi, serta kontrol penuh bagi trader.
 
-## Cara jalan
+## ✨ Fitur Utama
+- **Multi-symbol & Multi-timeframe Scanner**
+- Kombinasi indikator: *RSI, EMA, MACD, Bollinger Bands, ADX, ATR filter*
+- Strategi adaptif: Trend-follow, Mean-reversion, Breakout
+- Risk Management: TP/SL, trailing stop ATR, partial take profit, daily loss limit
+- Optimizer: Auto-optimisasi parameter via grid search/genetic algorithm
+- Backtest realistis: Simulasi fee, slippage, leverage, dan metrik performa *(Win rate, Profit Factor, Drawdown, Sharpe Ratio)*
+- Regime Detection: Filter sinyal sesuai kondisi pasar *(Trending/Sideways)*
+- Live & Paper Trading Mode
+- Monitoring Telegram: Alert sinyal, status bot, statistik harian, kontrol interaktif
+- Logging & Statistik: Trade journal, equity curve, laporan PDF harian
+
+## 📦 Instalasi
 ```bash
-npm i
-cp .env.example .env # isi key
-npm start
+git clone <repo-url>
+cd robot-trading-pro-v2
+npm install
+cp .env.example .env
 ```
 
-## Env penting
-- `AUTO_TRADE=true` untuk live order.
-- `TESTNET=true` untuk testnet.
-- `PAPER=true` untuk simulasi (placeholder).
-- `DAILY_REPORT_HOUR=23` untuk report harian.
+## ⚙️ Konfigurasi `.env`
+| Variable | Deskripsi |
+|----------|-----------|
+| `API_KEY` / `API_SECRET` | API key Binance Futures |
+| `TELEGRAM_TOKEN` / `TELEGRAM_CHAT_ID` | Integrasi Telegram |
+| `MODE` | `live` atau `paper` |
+| `SYMBOLS` | Daftar pair, contoh: `BTCUSDT,ETHUSDT` |
+| `INTERVALS` | Timeframe analisis, contoh: `5m,15m,1h` |
+| `LEVERAGE` | Leverage per trade, contoh: `20` |
+| `DAILY_MAX_LOSS_PERCENT` | Batas kerugian harian (%) |
 
-Catatan: trailing stop meng-update **STOP_MARKET closePosition** mengikuti puncak/lebah harga setelah entry. Untuk partial TP sebenarnya perlu split order reduceOnly per kuantitas; contoh ini tetap gunakan closePosition untuk kesederhanaan produksi.
+## ▶️ Menjalankan Bot
+```bash
+npm run start      # Live trading
+npm run paper      # Paper trading
+npm run backtest   # Backtest strategi
+npm run optimize   # Optimisasi parameter
+```
+
+## 📊 Backtest & Optimizer
+- **Backtest**: Uji strategi pada data historis.
+- **Optimizer**: Cari parameter optimal berdasarkan hasil backtest.
+```bash
+npm run backtest
+npm run optimize
+```
+
+## 🛡 Disclaimer
+Bot ini dibuat untuk **edukasi & riset**.  
+Trading futures berisiko tinggi dan dapat menyebabkan **kerugian total**.  
+Gunakan sesuai toleransi risiko Anda.

@@ -4,11 +4,14 @@ import { SymbolWorker } from './signal.js';
 import { logEvent, logError } from './logger.js';
 import { sendTelegramText } from './telegram.js';
 import { dailyStatsReport, shouldSendDailyReport } from './stats.js';
+import { syncServerTime } from './http.js';
 
 const workers = new Map();
 
 async function bootstrap(){
   logEvent('Bootstrapping bot...');
+  await syncServerTime();
+
   for (const s of SYMBOLS){
     const w = new SymbolWorker(s, INTERVAL);
     await w.init();
@@ -69,7 +72,11 @@ async function bootstrap(){
 
   connectWS();
 
-  await sendTelegramText(`Trading Bot Pro started. Symbols: ${SYMBOLS.join(', ')} Interval: ${INTERVAL}`);
+  await sendTelegramText(`Trading Bot Pro v3 started. Symbols: ${SYMBOLS.join(', ')} Interval: ${INTERVAL}`);
+
+  // graceful shutdown
+  process.on('SIGINT', ()=>{ logEvent('SIGINT received, exiting'); process.exit(0); });
+  process.on('SIGTERM', ()=>{ logEvent('SIGTERM received, exiting'); process.exit(0); });
 }
 
 bootstrap().catch(e => { logEvent('Bootstrap failed ' + String(e)); process.exit(1); });

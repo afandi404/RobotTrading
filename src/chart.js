@@ -15,7 +15,11 @@ export function buildLineChartConfig({ labels, closes, symbol, interval, signalT
   const cfg = {
     type: 'line',
     data: { labels, datasets },
-    options: { legend: { display: true }, title: { display: true, text: `${symbol} • ${signalType} signal` }, scales: { xAxes: [{ display: true }], yAxes: [{ display: true }] } }
+    options: {
+      legend: { display: true },
+      title: { display: true, text: `${symbol} • ${signalType} signal` },
+      scales: { xAxes: [{ display: true }], yAxes: [{ display: true }] }
+    }
   };
   return cfg;
 }

@@ -1,6 +1,6 @@
-import { RSI } from 'technicalindicators';
+import { RSI, EMA, ATR, BollingerBands } from 'technicalindicators';
 import { mean, stddev, clamp } from './utils.js';
-import { BASE_RSI, MIN_RSI_PERIOD, MAX_RSI_PERIOD, VOL_WINDOW, RSI_LOWER, RSI_UPPER } from './config.js';
+import { BASE_RSI, MIN_RSI_PERIOD, MAX_RSI_PERIOD, VOL_WINDOW, RSI_LOWER, RSI_UPPER, EMA_PERIOD, ATR_PERIOD } from './config.js';
 
 export function getAdaptiveRsiPeriod(recentForVol = []){
   if (!recentForVol.length) return BASE_RSI;
@@ -30,4 +30,16 @@ export function detectRsiSignal(rsiArray){
   if (prev <= RSI_LOWER && last > RSI_LOWER) return 'BUY';
   if (prev >= RSI_UPPER && last < RSI_UPPER) return 'SELL';
   return null;
+}
+
+export function ema(values, period=EMA_PERIOD){
+  return EMA.calculate({ period, values });
+}
+
+export function atr(high, low, close, period=ATR_PERIOD){
+  return ATR.calculate({ high, low, close, period });
+}
+
+export function bb(values, period=20, std=2){
+  return BollingerBands.calculate({ period, values, stdDev: std });
 }

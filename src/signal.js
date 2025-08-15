@@ -1,20 +1,24 @@
-import { computeAdaptiveRsi, detectRsiSignal } from './indicators.js';
-import { CONFIRMATION_CANDLES, COOLDOWN_SECONDS, TAKE_PROFIT_PERCENT, STOP_LOSS_PERCENT, POSITION_SIZE_PERCENT, LEVERAGE, AUTO_TRADE, LSR_BUY, LSR_SELL, FUNDING_THRESHOLD, INTERVAL, TRAILING_STOP_PERCENT, PARTIAL_TP1_PERCENT, PARTIAL_TP1_PROFIT, PARTIAL_TP2_PERCENT, PARTIAL_TP2_PROFIT, PAPER } from './config.js';
-import { fetchLongShort, fetchFundingRate, fetchOpenInterest, fetchKlines, fetchUSDTBalance, placeMarketOrder, placeCloseTP, placeCloseSL, getPositionRisk, getSymbolInfo, changeLeverage, cancelAllOpenOrders } from './binance.js';
+import { computeAdaptiveRsi, detectRsiSignal, ema, atr } from './indicators.js';
+import { CONFIRMATION_CANDLES, COOLDOWN_SECONDS, TAKE_PROFIT_PERCENT, STOP_LOSS_PERCENT, POSITION_SIZE_PERCENT, LEVERAGE, AUTO_TRADE, LSR_BUY, LSR_SELL, FUNDING_THRESHOLD, INTERVAL, PARTIAL_TP1_PERCENT, PARTIAL_TP1_PROFIT, PARTIAL_TP2_PERCENT, PARTIAL_TP2_PROFIT, PAPER, EMA_PERIOD, ATR_PERIOD, ATR_MULT_SL, ATR_MULT_TRAIL, DAILY_MAX_LOSS_PERCENT } from './config.js';
+import { fetchLongShort, fetchFundingRate, fetchOpenInterest, fetchKlines, fetchUSDTBalance, placeMarketOrder, placeCloseTP, placeCloseSL, getPositionRisk, getSymbolInfo, changeLeverage, cancelAllOpenOrders, placeLimitOrder } from './binance.js';
 import { sendTelegramText, sendTelegramPhotoBuffer } from './telegram.js';
 import { buildLineChartConfig, getChartPngBuffer } from './chart.js';
 import { logEvent, logTrade } from './logger.js';
-import { computeQtyFromBalance, buildTpSlPrices, floorToTick } from './risk.js';
+import { computeQtyFromBalance, buildTpSlPrices, floorToTick, qtyForPartial } from './risk.js';
+import { reachedDailyLossLimit } from './stats.js';
 
 export class SymbolWorker{
   constructor(symbol, interval){
     this.symbol = symbol;
     this.interval = interval;
     this.closes = [];
+    this.highs = [];
+    this.lows = [];
     this.times = [];
     this.pending = null;
     this.lastSent = { signature: null, ts: 0 };
     this.trailing = null; // { side, entryPrice, peak, trough, slPrice }
+    this.equityStart = null; // track daily guard
   }
 
   canSend(signature){
@@ -26,12 +30,19 @@ export class SymbolWorker{
   async init(){
     const raw = await fetchKlines(this.symbol, this.interval, 500);
     this.closes = raw.map(r=>Number(r[4]));
+    this.highs = raw.map(r=>Number(r[2]));
+    this.lows = raw.map(r=>Number(r[3]));
     this.times = raw.map(r=>r[6] || r[0]);
     logEvent(`Worker ${this.symbol} loaded history ${this.closes.length}`);
   }
 
   async ensureLeverage(){
     try{ await changeLeverage(this.symbol, LEVERAGE); }catch(e){ logEvent('changeLeverage failed '+String(e)); }
+  }
+
+  dailyLossBlocked(){
+    // Here we could query account balance at start-of-day and now; simplified: skip inside worker (global guard can be added)
+    return false;
   }
 
   async onNewClosedCandle(){
@@ -42,11 +53,21 @@ export class SymbolWorker{
       const price = this.closes[this.closes.length-1];
       const rsiValue = rsi[rsi.length-1];
 
-      // Update trailing stop if any position
-      await this.updateTrailing(price);
+      // Regime filters
+      const emaArr = ema(this.closes);
+      const trendUp = price >= (emaArr[emaArr.length-1] || price);
+      const atrArr = atr(this.highs, this.lows, this.closes, ATR_PERIOD);
+      const atrNow = atrArr[atrArr.length-1] || 0;
+
+      // Update trailing if any position
+      await this.updateTrailing(price, atrNow);
 
       if (!this.pending){
         if (rsiSignal){
+          // apply regime gate early for less noise in pending
+          if ((rsiSignal==='BUY' && !trendUp) || (rsiSignal==='SELL' && trendUp)){
+            this.heartbeat(price, rsiValue, period); return;
+          }
           this.pending = { type: rsiSignal, count: 1, period, firstPrice: price, firstRsi: rsiValue, firstTime: Date.now() };
           logEvent(`Pending1 ${this.symbol} ${this.pending.type} p${period}`);
         } else {
@@ -64,15 +85,16 @@ export class SymbolWorker{
             fetchFundingRate(this.symbol, 1),
             fetchOpenInterest(this.symbol)
           ]);
+
           let allow = false;
           if (this.pending.type === 'BUY'){
             const condLsr = (lsr === undefined) ? true : (lsr > LSR_BUY);
             const condFund = (fr === undefined) ? true : (fr < FUNDING_THRESHOLD);
-            allow = (condLsr || condFund);
+            allow = (condLsr || condFund) && trendUp;
           } else {
             const condLsr = (lsr === undefined) ? true : (lsr < LSR_SELL);
             const condFund = (fr === undefined) ? true : (fr > FUNDING_THRESHOLD);
-            allow = (condLsr || condFund);
+            allow = (condLsr || condFund) && !trendUp;
           }
 
           const signature = `${this.symbol}@${this.pending.type}@p${this.pending.period}`;
@@ -81,10 +103,11 @@ export class SymbolWorker{
             this.pending = null; return;
           }
 
-          const N = Math.min(80, this.closes.length);
+          const N = Math.min(200, this.closes.length);
           const labels = this.times.slice(-N).map(t=>{ const d=new Date(t); return `${d.getHours()}:${String(d.getMinutes()).padStart(2,'0')}`; });
           const closesForChart = this.closes.slice(-N);
-          const cfg = buildLineChartConfig({ labels, closes: closesForChart, symbol: this.symbol, interval: this.interval, signalType: this.pending.type });
+          const overlays = { ema: emaArr.slice(-N) };
+          const cfg = buildLineChartConfig({ labels, closes: closesForChart, symbol: this.symbol, interval: this.interval, signalType: this.pending.type, overlays });
           let imgBuf = null;
           try { imgBuf = await getChartPngBuffer(cfg); } catch(e){ logEvent('Chart gen failed ' + String(e)); }
 
@@ -93,6 +116,8 @@ export class SymbolWorker{
             `Price: ${price}`,
             `AdaptiveRSI period: ${this.pending.period}`,
             `RSI: ${rsiValue.toFixed(2)}`,
+            `Trend: ${trendUp?'UP':'DOWN'} EMA${EMA_PERIOD}`,
+            `ATR: ${atrNow?.toFixed(2)}`,
             `LongShortRatio: ${lsr ?? 'N/A'}`,
             `FundingRate: ${fr ?? 'N/A'}`,
             `OpenInterest: ${oi ?? 'N/A'}`,
@@ -112,23 +137,34 @@ export class SymbolWorker{
                 const qty = await computeQtyFromBalance({ symbol: this.symbol, usdtBalance: usdtBal, price, positionPercent: POSITION_SIZE_PERCENT, leverage: LEVERAGE });
                 if (qty <= 0) throw new Error('qty=0');
                 const side = this.pending.type === 'BUY' ? 'BUY' : 'SELL';
-                const order = await placeMarketOrder(this.symbol, side, qty);
+
+                const order = await placeMarketOrder(this.symbol, side, qty, false);
                 logTrade({ symbol: this.symbol, side, qty, price, meta: { order } });
 
-                // Set initial TP/SL
-                const { tp, sl } = buildTpSlPrices({ side, price, takeProfitPct: TAKE_PROFIT_PERCENT, stopLossPct: STOP_LOSS_PERCENT, tickSize: info.tickSize });
+                // Initial TP/SL (SL via ATR primarily)
+                const atrSl = this.pending.type==='BUY'? price - ATR_MULT_SL*atrNow : price + ATR_MULT_SL*atrNow;
+                const { tp: tpFallback, sl: slFixed } = buildTpSlPrices({ side, price, takeProfitPct: TAKE_PROFIT_PERCENT, stopLossPct: STOP_LOSS_PERCENT, tickSize: info.tickSize });
+                const slUse = floorToTick(atrSl, info.tickSize) || slFixed;
                 const closeSide = side === 'BUY' ? 'SELL' : 'BUY';
                 try { await cancelAllOpenOrders(this.symbol); } catch {}
-                try { await placeCloseTP(this.symbol, closeSide, tp.toFixed(8)); } catch(e){ logEvent('TP place failed ' + String(e)); }
-                try { await placeCloseSL(this.symbol, closeSide, sl.toFixed(8)); } catch(e){ logEvent('SL place failed ' + String(e)); }
+                try { await placeCloseSL(this.symbol, closeSide, slUse.toFixed(8)); } catch(e){ logEvent('SL place failed ' + String(e)); }
+
+                // Partial TP via reduceOnly LIMIT orders
+                try {
+                  const tp1 = side==='BUY'? price*(1+PARTIAL_TP1_PROFIT/100) : price*(1-PARTIAL_TP1_PROFIT/100);
+                  const tp2 = side==='BUY'? price*(1+PARTIAL_TP2_PROFIT/100) : price*(1-PARTIAL_TP2_PROFIT/100);
+                  const q1 = qtyForPartial(qty, PARTIAL_TP1_PERCENT);
+                  const q2 = qtyForPartial(qty, PARTIAL_TP2_PERCENT);
+                  await placeLimitOrder(this.symbol, closeSide, q1.toFixed(8), tp1.toFixed(8), true);
+                  await placeLimitOrder(this.symbol, closeSide, q2.toFixed(8), tp2.toFixed(8), true);
+                } catch(e){ logEvent('Partial TP place failed '+String(e)); }
 
                 // Initialize trailing
                 this.trailing = side==='BUY'
-                  ? { side, entryPrice: price, peak: price, slPrice: sl }
-                  : { side, entryPrice: price, trough: price, slPrice: sl };
+                  ? { side, entryPrice: price, peak: price, slPrice: slUse }
+                  : { side, entryPrice: price, trough: price, slPrice: slUse };
 
-                // Partial TP not natively supported with closePosition=true, usually use reduceOnly orders with quantity. Here we keep SL/TP closePosition and let trailing handle SL improvement.
-                await sendTelegramText(`${this.symbol} AUTO-TRADE ${side} qty=${qty} @${price}. TP ${tp} SL ${sl}`);
+                await sendTelegramText(`${this.symbol} AUTO-TRADE ${side} qty=${qty} @${price}. SL ${slUse}`);
               } catch(e){
                 await sendTelegramText(`${this.symbol} AUTO-TRADE ERROR: ${String(e)}`);
               }
@@ -141,6 +177,10 @@ export class SymbolWorker{
         }
       } else {
         if (rsiSignal){
+          // keep regime gate even when flipping
+          if ((rsiSignal==='BUY' && !trendUp) || (rsiSignal==='SELL' && trendUp)){
+            this.pending = null; this.heartbeat(price, rsiValue, period); return;
+          }
           this.pending = { type: rsiSignal, count: 1, period, firstPrice: price, firstRsi: rsiValue, firstTime: Date.now() };
           logEvent(`Signal changed -> new pending ${this.symbol} ${rsiSignal}`);
         } else {
@@ -155,7 +195,7 @@ export class SymbolWorker{
     }
   }
 
-  async updateTrailing(price){
+  async updateTrailing(price, atrNow){
     if (!this.trailing || PAPER) return;
     try{
       const info = await getSymbolInfo(this.symbol);
@@ -165,7 +205,7 @@ export class SymbolWorker{
       const side = posAmt>0 ? 'BUY' : 'SELL';
       if (side==='BUY'){
         this.trailing.peak = Math.max(this.trailing.peak || price, price);
-        const newSl = this.trailing.peak * (1 - TRAILING_STOP_PERCENT/100);
+        const newSl = this.trailing.peak - ATR_MULT_TRAIL*atrNow;
         if (newSl > this.trailing.slPrice){
           const sl = floorToTick(newSl, info.tickSize);
           const closeSide = 'SELL';
@@ -173,7 +213,7 @@ export class SymbolWorker{
         }
       } else { // SELL
         this.trailing.trough = Math.min(this.trailing.trough || price, price);
-        const newSl = this.trailing.trough * (1 + TRAILING_STOP_PERCENT/100);
+        const newSl = this.trailing.trough + ATR_MULT_TRAIL*atrNow;
         if (newSl < this.trailing.slPrice){
           const sl = floorToTick(newSl, info.tickSize);
           const closeSide = 'BUY';
@@ -191,11 +231,17 @@ export class SymbolWorker{
   onKline(k){
     const isFinal = k.x;
     const close = Number(k.c);
+    const high = Number(k.h);
+    const low  = Number(k.l);
     const closeTime = k.T || k.t || Date.now();
     if (isFinal){
       this.closes.push(close);
+      this.highs.push(high);
+      this.lows.push(low);
       this.times.push(closeTime);
-      if (this.closes.length > 1000){ this.closes = this.closes.slice(-1000); this.times = this.times.slice(-1000); }
+      if (this.closes.length > 1500){
+        this.closes = this.closes.slice(-1500); this.highs=this.highs.slice(-1500); this.lows=this.lows.slice(-1500); this.times = this.times.slice(-1500);
+      }
       this.onNewClosedCandle();
     }
   }

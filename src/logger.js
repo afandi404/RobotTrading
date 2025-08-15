@@ -5,6 +5,7 @@ import { LOG_DIR } from './config.js';
 if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR, { recursive: true });
 const tradeLogFile = path.join(LOG_DIR, 'trades.log');
 const eventLogFile = path.join(LOG_DIR, 'events.log');
+const pnlStateFile  = path.join(LOG_DIR, 'pnl_state.json');
 
 export function logEvent(msg, meta = {}){
   const line = JSON.stringify({ ts: new Date().toISOString(), level:'info', msg, ...meta });
@@ -28,4 +29,11 @@ export function logTrade(entry){
   const line = JSON.stringify({ ts: new Date().toISOString(), ...entry });
   console.log('TRADE', entry.side, entry.symbol, entry.qty, '@', entry.price);
   fs.appendFileSync(tradeLogFile, line + "\n");
+}
+
+export function loadPnlState(){
+  try{ return JSON.parse(fs.readFileSync(pnlStateFile,'utf8')); }catch{ return { today: null, realized: 0 }; }
+}
+export function savePnlState(state){
+  try{ fs.writeFileSync(pnlStateFile, JSON.stringify(state)); }catch{}
 }

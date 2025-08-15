@@ -1,5 +1,6 @@
-import { floorToStep } from './utils.js';
+import { floorToStep, roundToTick } from './utils.js';
 import { getSymbolInfo } from './binance.js';
+import { TAKER_FEE_BPS, SLIPPAGE_BPS } from './config.js';
 
 export function floorToTick(value, tick){
   const p = Math.max(0, Math.ceil(-Math.log10(tick)));
@@ -25,8 +26,11 @@ export function buildTpSlPrices({ side, price, takeProfitPct, stopLossPct, tickS
   };
 }
 
-// export function floorToStep(value, step){
-//   const precision = Math.max(0, Math.ceil(-Math.log10(step)));
-//   const factor = Math.pow(10, precision);
-//   return Math.floor(value * factor) / factor;
-// }
+export function applyCosts(price, side){
+  // naive cost model: taker fee + slippage
+  const fee = price * (TAKER_FEE_BPS/10000);
+  const slip = price * (SLIPPAGE_BPS/10000);
+  return side==='BUY' ? price + fee + slip : price - fee - slip;
+}
+
+export function qtyForPartial(qty, pct){ return roundToTick(qty * pct, 1e-8); }
