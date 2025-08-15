@@ -18,8 +18,8 @@ Dirancang untuk performa konsisten, fleksibilitas tinggi, serta kontrol penuh ba
 
 ## 📦 Instalasi
 ```bash
-git clone <repo-url>
-cd robot-trading-pro-v2
+git clone https://github.com/afandi404/RobotTrading
+cd RobotTrading
 npm install
 cp .env.example .env
 ```
