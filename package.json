@@ -1,12 +1,21 @@
 {
   "name": "robottrading",
+<<<<<<< HEAD
   "version": "4.0.0",
   "description": "Robot trading Binance Futures — upgraded pro edition",
+=======
+  "version": "3.0.0",
+  "description": "Adaptive RSI futures bot with regime filter, ATR trailing, optimizer & walk-forward backtest",
+>>>>>>> 59f769cb3bc345dab8c09e78d07038b32c1ed172
   "main": "src/index.js",
   "type": "module",
   "scripts": {
     "start": "node src/index.js",
+<<<<<<< HEAD
     "start:paper": "PAPER=true node src/index.js",
+=======
+    "paper": "PAPER=true node src/index.js",
+>>>>>>> 59f769cb3bc345dab8c09e78d07038b32c1ed172
     "backtest": "node src/backtest.js",
     "optimize": "node src/optimizer.js",
     "walkforward": "node src/walkforward.js"
@@ -20,7 +29,10 @@
     "dotenv": "^17.2.1",
     "form-data": "^4.0.4",
     "technicalindicators": "^3.1.0",
+<<<<<<< HEAD
     "winston": "^3.17.0",
+=======
+>>>>>>> 59f769cb3bc345dab8c09e78d07038b32c1ed172
     "ws": "^8.18.3"
   }
 }

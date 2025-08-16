@@ -1,3 +1,7 @@
+<<<<<<< HEAD
+=======
+// Simple walk-forward validation: split, optimize on IS, test on OOS.
+>>>>>>> 59f769cb3bc345dab8c09e78d07038b32c1ed172
 import { SYMBOLS, INTERVAL } from './config.js';
 import { fetchKlines } from './binance.js';
 import { computeAdaptiveRsi } from './indicators.js';
@@ -19,22 +23,40 @@ function evaluate(closes, params){
   return eq;
 }
 
+<<<<<<< HEAD
 function generateGrid(){ const arr=[]; for (let l=20;l<=40;l+=5) for (let u=60;u<=80;u+=5) for (let h of [2,3,5]) arr.push({lower:l, upper:u, hold:h}); return arr; }
 
 async function run(){
   for (const sym of SYMBOLS){
     const data = await fetchKlines(sym, INTERVAL, 1500);
+=======
+function grid(){
+  const arr=[]; for (let l of [25,30,35]) for (let u of [65,70,75]) for (let h of [3,5,8]) arr.push({lower:l, upper:u, hold:h}); return arr;
+}
+
+async function run(){
+  for (const sym of SYMBOLS){
+    const data = await fetchKlines(sym, INTERVAL, 1200);
+>>>>>>> 59f769cb3bc345dab8c09e78d07038b32c1ed172
     const closes = data.map(r=>Number(r[4]));
     const mid = Math.floor(closes.length*0.7);
     const is = closes.slice(0, mid);
     const oos = closes.slice(mid);
+<<<<<<< HEAD
     let best=null;
     for (const p of generateGrid()){ const eq = evaluate(is, p); if(!best||eq>best.eq) best={...p,eq}; }
+=======
+    let best=null; for (const p of grid()){ const eq = evaluate(is, p); if(!best||eq>best.eq) best={...p,eq}; }
+>>>>>>> 59f769cb3bc345dab8c09e78d07038b32c1ed172
     const oosEq = evaluate(oos, best);
     console.log(`[WF] ${sym} IS best=${JSON.stringify(best)} OOS_EQ=${oosEq.toFixed(3)}`);
   }
 }
+<<<<<<< HEAD
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   run().catch(e => console.error(e));
 }
+=======
+run();
+>>>>>>> 59f769cb3bc345dab8c09e78d07038b32c1ed172

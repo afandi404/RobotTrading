@@ -1,7 +1,11 @@
 .env
 node_modules/
+<<<<<<< HEAD
 package-lock.json
 events.log
 error.log
 combined.log
 logs/
+=======
+events.log
+>>>>>>> 59f769cb3bc345dab8c09e78d07038b32c1ed172
